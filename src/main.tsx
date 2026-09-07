@@ -78,7 +78,13 @@ type DayStats = {
   correct: number;
   goal: number;
 };
-const dayKey = () => new Date().toISOString().slice(0, 10);
+const localKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+const dayKey = () => localKey();
 const blankDay = (): DayStats => ({
   opened: 0,
   studied: 0,
@@ -106,7 +112,7 @@ const readDays = (): Record<string, DayStats> => {
 const learningStreak = (days: Record<string, DayStats>) => {
   let count = 0;
   for (let i = 0; i < 365; i++) {
-    const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    const date = localKey(new Date(Date.now() - i * 86400000));
     if ((days[date]?.studied || 0) >= (days[date]?.goal || 200)) count++;
     else break;
   }
@@ -416,6 +422,7 @@ function App() {
               xp={xp}
               cardsOpened={cardsOpened}
               todayStats={todayStats}
+              days={days}
             />
           )}{" "}
           {page === "vocabulary" && (
@@ -441,7 +448,7 @@ function App() {
                   localStorage.setItem("ziaedu-cards-opened", String(next));
                   return next;
                 });
-                const key = new Date().toISOString().slice(0, 10);
+                const key = localKey();
                 const activity = JSON.parse(
                   localStorage.getItem("ziaedu-daily-activity") || "{}",
                 );
@@ -625,6 +632,7 @@ function Dashboard({
   xp,
   cardsOpened,
   todayStats,
+  days,
 }: {
   go: (p: Page) => void;
   due: number;
@@ -633,6 +641,7 @@ function Dashboard({
   xp: number;
   cardsOpened: number;
   todayStats: DayStats;
+  days: Record<string, DayStats>;
 }) {
   const dailyPercent = Math.min(
     100,
@@ -640,6 +649,29 @@ function Dashboard({
       ? Math.round((todayStats.studied / todayStats.goal) * 100)
       : 0,
   );
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  const mondayOffset = (weekStart.getDay() + 6) % 7;
+  weekStart.setDate(weekStart.getDate() - mondayOffset);
+  const weekDays = [
+    "Senin",
+    "Selasa",
+    "Rabu",
+    "Kamis",
+    "Jumat",
+    "Sabtu",
+    "Minggu",
+  ].map((label, index) => {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
+    const key = localKey(date);
+    return {
+      label,
+      key,
+      done: (days[key]?.studied || 0) >= (days[key]?.goal || 200),
+      today: key === dayKey(),
+    };
+  });
   return (
     <>
       <div className="welcome-row">
@@ -696,16 +728,19 @@ function Dashboard({
             <small>hari</small>
           </div>
           <div className="week">
-            <span>S</span>
-            <span>S</span>
-            <span>S</span>
-            <span>S</span>
-            <span className="today">S</span>
-            <span>J</span>
-            <span>J</span>
+            {weekDays.map((day) => (
+              <span
+                key={day.key}
+                className={`${day.done ? "completed" : ""} ${day.today ? "today" : ""}`}
+                title={day.label}
+              >
+                {day.label.slice(0, 2)}
+              </span>
+            ))}
           </div>
           <p>
-            <b>2 hari lagi</b> untuk rekor baru!
+            <b>{weekDays.filter((day) => day.done).length} hari aktif</b> minggu
+            ini
           </p>
         </section>
       </div>
@@ -1324,15 +1359,13 @@ function Vocabulary({
       <div className="vocab-overview">
         <div>
           <span>Total kosakata</span>
-          <strong>{words.length * 63 + 24}</strong>
-          <small>+24 minggu ini</small>
+          <strong>{words.length}</strong>
+          <small>kartu tersimpan</small>
         </div>
         <div>
           <span>Sudah dikuasai</span>
-          <strong>
-            {words.filter((w) => w.mastery >= 80).length * 18 + 74}
-          </strong>
-          <small className="green-text">↑ 12% bulan ini</small>
+          <strong>{words.filter((w) => w.mastery >= 80).length}</strong>
+          <small className="green-text">mastery ≥ 80%</small>
         </div>
         <div>
           <span>Perlu diulang</span>
@@ -1807,10 +1840,19 @@ function Module({
   const x = info[page] || info.topics;
   const Icon = x.icon;
   const [note, setNote] = useState("");
-  const [notes, setNotes] = useState([
-    "Small steps compound into remarkable results.",
-    "Review new words before bedtime.",
-  ]);
+  const [notes, setNotes] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("ziaedu-notes") || "null");
+      return Array.isArray(saved)
+        ? saved
+        : [
+            "Small steps compound into remarkable results.",
+            "Review new words before bedtime.",
+          ];
+    } catch {
+      return [];
+    }
+  });
   const [lesson, setLesson] = useState<string | null>(null);
   return (
     <>
@@ -1872,7 +1914,12 @@ function Module({
               className="btn primary"
               onClick={() => {
                 if (note) {
-                  setNotes([note, ...notes]);
+                  const nextNotes = [note.trim(), ...notes];
+                  setNotes(nextNotes);
+                  localStorage.setItem(
+                    "ziaedu-notes",
+                    JSON.stringify(nextNotes),
+                  );
                   setNote("");
                   toast("Catatan tersimpan");
                 }
@@ -1890,7 +1937,23 @@ function Module({
                 <b>{n}</b>
                 <small>Catatan belajar · baru saja</small>
               </div>
-              <Star size={16} />
+              <button
+                className="icon-btn note-menu"
+                title="Hapus catatan"
+                onClick={() => {
+                  if (window.confirm("Hapus catatan ini?")) {
+                    const nextNotes = notes.filter((_, index) => index !== i);
+                    setNotes(nextNotes);
+                    localStorage.setItem(
+                      "ziaedu-notes",
+                      JSON.stringify(nextNotes),
+                    );
+                    toast("Catatan dihapus");
+                  }
+                }}
+              >
+                <MoreHorizontal size={18} />
+              </button>
             </div>
           ))}
         </div>
@@ -2604,7 +2667,7 @@ function Achievements({
   toast: (message: string) => void;
 }) {
   const target = 200;
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = localKey();
   const [range, setRange] = useState("week");
   const [daily] = useState<Record<string, number>>(() => {
     const stored = JSON.parse(
@@ -2627,13 +2690,13 @@ function Achievements({
   const dateList = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(Date.now() - (6 - i) * 86400000);
     return {
-      key: d.toISOString().slice(0, 10),
+      key: localKey(d),
       label: d
         .toLocaleDateString("id-ID", { weekday: "short" })
         .replace(".", ""),
       value: Math.min(
         100,
-        Math.round(((daily[d.toISOString().slice(0, 10)] || 0) / target) * 100),
+        Math.round(((daily[localKey(d)] || 0) / target) * 100),
       ),
     };
   });
@@ -2794,7 +2857,7 @@ function Statistics({
   const labels = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
   const recent = Array.from({ length: 7 }, (_, i) => {
     const date = new Date(Date.now() - (6 - i) * 86400000);
-    return days[date.toISOString().slice(0, 10)] || blankDay();
+    return days[localKey(date)] || blankDay();
   });
   const activity = recent.map((day) =>
     Math.min(100, Math.round(day.seconds / 60)),
@@ -2826,9 +2889,6 @@ function Statistics({
             detail.
           </p>
         </div>
-        <span className="select-sm">
-          7 hari terakhir <ChevronDown size={13} />
-        </span>
       </div>
       <div className="stats-summary">
         <Stat
