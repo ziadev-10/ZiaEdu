@@ -92,19 +92,35 @@ const blankDay = (): DayStats => ({
   mastered: 0,
   seconds: 0,
   correct: 0,
-  goal: 200,
+  goal: 20,
 });
 const readDays = (): Record<string, DayStats> => {
   try {
     const stored = JSON.parse(
       localStorage.getItem("ziaedu-daily-stats") || "{}",
     );
-    return Object.fromEntries(
+    const normalized = Object.fromEntries(
       Object.entries(stored).map(([key, value]) => [
         key,
-        { ...blankDay(), ...(value as Partial<DayStats>), goal: 200 },
+        { ...blankDay(), ...(value as Partial<DayStats>), goal: 20 },
       ]),
     );
+    const legacy = JSON.parse(
+      localStorage.getItem("ziaedu-daily-activity") || "{}",
+    );
+    Object.entries(legacy).forEach(([key, value]) => {
+      const count = Math.min(200, Number(value) || 0);
+      const current = normalized[key] || blankDay();
+      if (count > current.studied)
+        normalized[key] = {
+          ...current,
+          opened: Math.max(current.opened, count),
+          studied: count,
+          goal: 20,
+        };
+    });
+    localStorage.setItem("ziaedu-daily-stats", JSON.stringify(normalized));
+    return normalized;
   } catch {
     return {};
   }
@@ -113,7 +129,7 @@ const learningStreak = (days: Record<string, DayStats>) => {
   let count = 0;
   for (let i = 0; i < 365; i++) {
     const date = localKey(new Date(Date.now() - i * 86400000));
-    if ((days[date]?.studied || 0) >= (days[date]?.goal || 200)) count++;
+    if ((days[date]?.studied || 0) >= (days[date]?.goal || 20)) count++;
     else break;
   }
   return count;
@@ -292,7 +308,13 @@ function App() {
       const today = { ...blankDay(), ...(current[key] || {}) };
       const next = {
         ...current,
-        [key]: { ...today, [field]: (today[field] as number) + amount },
+        [key]: {
+          ...today,
+          [field]:
+            field === "opened" || field === "studied"
+              ? Math.min(200, (today[field] as number) + amount)
+              : (today[field] as number) + amount,
+        },
       };
       localStorage.setItem("ziaedu-daily-stats", JSON.stringify(next));
       return next;
@@ -668,7 +690,8 @@ function Dashboard({
     return {
       label,
       key,
-      done: (days[key]?.studied || 0) >= (days[key]?.goal || 200),
+      done: (days[key]?.studied || 0) >= (days[key]?.goal || 20),
+      active: (days[key]?.studied || 0) > 0,
       today: key === dayKey(),
     };
   });
@@ -731,7 +754,7 @@ function Dashboard({
             {weekDays.map((day) => (
               <span
                 key={day.key}
-                className={`${day.done ? "completed" : ""} ${day.today ? "today" : ""}`}
+                className={`${day.active ? "completed" : ""} ${day.today ? "today" : ""}`}
                 title={day.label}
               >
                 {day.label.slice(0, 2)}
@@ -739,9 +762,12 @@ function Dashboard({
             ))}
           </div>
           <p>
-            <b>{weekDays.filter((day) => day.done).length} hari aktif</b> minggu
-            ini
+            <b>{weekDays.filter((day) => day.active).length} hari aktif</b>{" "}
+            minggu ini
           </p>
+          <small className="streak-rule">
+            Streak dihitung setelah target harian tercapai: 20 kartu.
+          </small>
         </section>
       </div>
       <div className="stat-grid">
@@ -2666,7 +2692,7 @@ function Achievements({
   streak: number;
   toast: (message: string) => void;
 }) {
-  const target = 200;
+  const target = 20;
   const todayKey = localKey();
   const [range, setRange] = useState("week");
   const [daily] = useState<Record<string, number>>(() => {
@@ -3399,7 +3425,9 @@ function SpeakingPractice() {
                       {item.date} · {format(item.duration)}
                     </small>
                   </div>
-                  <audio className="history-audio" controls src={item.url} />
+                  <audio className="history-audio" controls preload="metadata">
+                    <source src={item.url} type="audio/webm" />
+                  </audio>
                   <strong>{item.score}</strong>
                   <button
                     className="icon-btn"

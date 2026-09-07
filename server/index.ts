@@ -73,9 +73,17 @@ const seed: Vocabulary[] = [
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 const uploadDir = path.resolve("server/uploads");
+const storage = multer.diskStorage({
+  destination: uploadDir,
+  filename: (_req, file, callback) =>
+    callback(null, `${Date.now()}-${file.fieldname}.webm`),
+});
 const upload = multer({
-  dest: uploadDir,
+  storage,
   limits: { fileSize: 25 * 1024 * 1024 },
+});
+app.get("/uploads/:filename", (req, res) => {
+  res.type("audio/webm").sendFile(req.params.filename, { root: uploadDir });
 });
 app.use("/uploads", express.static(uploadDir));
 void fs.mkdir(uploadDir, { recursive: true });

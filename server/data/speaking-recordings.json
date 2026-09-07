@@ -1,0 +1,35 @@
+[
+  {
+    "recording_id": "rec_1788767338543",
+    "speaking_exercise_id": "My daily routine",
+    "audio_file_url": "/uploads/7486c119204b7bcb6ff4e4d6b0d5d8c5",
+    "duration": 4,
+    "file_size": 69974,
+    "format": "audio/webm",
+    "created_at": "2026-09-07T07:48:58.543Z",
+    "topic": "My daily routine",
+    "prompt": "Tell us about your typical day from morning until night."
+  },
+  {
+    "recording_id": "rec_1788767179580",
+    "speaking_exercise_id": "My daily routine",
+    "audio_file_url": "/uploads/a90a1691ea50067faaf43241b8662e3d",
+    "duration": 26,
+    "file_size": 424370,
+    "format": "audio/webm",
+    "created_at": "2026-09-07T07:46:19.580Z",
+    "topic": "My daily routine",
+    "prompt": "Tell us about your typical day from morning until night."
+  },
+  {
+    "recording_id": "rec_1788767021710",
+    "speaking_exercise_id": "My daily routine",
+    "audio_file_url": "/uploads/1f5d9ede73d4c66e685e4fe00c9d7098",
+    "duration": 2,
+    "file_size": 33140,
+    "format": "audio/webm",
+    "created_at": "2026-09-07T07:43:41.710Z",
+    "topic": "My daily routine",
+    "prompt": "Tell us about your typical day from morning until night."
+  }
+]
