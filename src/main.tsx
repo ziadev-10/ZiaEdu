@@ -86,11 +86,19 @@ const blankDay = (): DayStats => ({
   mastered: 0,
   seconds: 0,
   correct: 0,
-  goal: 20,
+  goal: 200,
 });
 const readDays = (): Record<string, DayStats> => {
   try {
-    return JSON.parse(localStorage.getItem("ziaedu-daily-stats") || "{}");
+    const stored = JSON.parse(
+      localStorage.getItem("ziaedu-daily-stats") || "{}",
+    );
+    return Object.fromEntries(
+      Object.entries(stored).map(([key, value]) => [
+        key,
+        { ...blankDay(), ...(value as Partial<DayStats>), goal: 200 },
+      ]),
+    );
   } catch {
     return {};
   }
@@ -99,7 +107,7 @@ const learningStreak = (days: Record<string, DayStats>) => {
   let count = 0;
   for (let i = 0; i < 365; i++) {
     const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-    if ((days[date]?.studied || 0) >= (days[date]?.goal || 20)) count++;
+    if ((days[date]?.studied || 0) >= (days[date]?.goal || 200)) count++;
     else break;
   }
   return count;
@@ -626,6 +634,12 @@ function Dashboard({
   cardsOpened: number;
   todayStats: DayStats;
 }) {
+  const dailyPercent = Math.min(
+    100,
+    todayStats.goal
+      ? Math.round((todayStats.studied / todayStats.goal) * 100)
+      : 0,
+  );
   return (
     <>
       <div className="welcome-row">
@@ -736,17 +750,10 @@ function Dashboard({
       <div className="progress-grid">
         <ProgressCard
           title="Kosakata"
-          value="68%"
-          sub="136 dari 200 kata"
+          value={`${dailyPercent}%`}
+          sub={`${todayStats.studied} dari ${todayStats.goal} kartu hari ini`}
           color="blue"
           icon={BookOpen}
-        />
-        <ProgressCard
-          title="TOEIC"
-          value="730"
-          sub="Target: 800"
-          color="orange"
-          icon={Target}
         />
       </div>
       <div className="lower-grid">
@@ -762,16 +769,18 @@ function Dashboard({
           </div>
           <div className="target-progress">
             <div className="ring">
-              <b>75</b>
+              <b>{dailyPercent}</b>
               <small>%</small>
             </div>
             <div>
               <h3>Hampir selesai!</h3>
               <p>15 menit belajar hari ini</p>
               <div className="bar">
-                <span style={{ width: "75%" }} />
+                <span style={{ width: `${dailyPercent}%` }} />
               </div>
-              <small>15 / 20 menit</small>
+              <small>
+                {todayStats.studied} / {todayStats.goal} kartu
+              </small>
             </div>
           </div>
           <button className="btn full-btn" onClick={() => go("flashcards")}>
@@ -2594,7 +2603,7 @@ function Achievements({
   streak: number;
   toast: (message: string) => void;
 }) {
-  const target = 20;
+  const target = 200;
   const todayKey = new Date().toISOString().slice(0, 10);
   const [range, setRange] = useState("week");
   const [daily] = useState<Record<string, number>>(() => {
