@@ -92,7 +92,7 @@ const blankDay = (): DayStats => ({
   mastered: 0,
   seconds: 0,
   correct: 0,
-  goal: 20,
+  goal: 100,
 });
 const readDays = (): Record<string, DayStats> => {
   try {
@@ -102,21 +102,21 @@ const readDays = (): Record<string, DayStats> => {
     const normalized = Object.fromEntries(
       Object.entries(stored).map(([key, value]) => [
         key,
-        { ...blankDay(), ...(value as Partial<DayStats>), goal: 20 },
+        { ...blankDay(), ...(value as Partial<DayStats>), goal: 100 },
       ]),
     );
     const legacy = JSON.parse(
       localStorage.getItem("ziaedu-daily-activity") || "{}",
     );
     Object.entries(legacy).forEach(([key, value]) => {
-      const count = Math.min(200, Number(value) || 0);
+      const count = Math.min(700, Number(value) || 0);
       const current = normalized[key] || blankDay();
       if (count > current.studied)
         normalized[key] = {
           ...current,
           opened: Math.max(current.opened, count),
           studied: count,
-          goal: 20,
+          goal: 100,
         };
     });
     localStorage.setItem("ziaedu-daily-stats", JSON.stringify(normalized));
@@ -129,7 +129,7 @@ const learningStreak = (days: Record<string, DayStats>) => {
   let count = 0;
   for (let i = 0; i < 365; i++) {
     const date = localKey(new Date(Date.now() - i * 86400000));
-    if ((days[date]?.studied || 0) >= (days[date]?.goal || 20)) count++;
+    if ((days[date]?.studied || 0) >= (days[date]?.goal || 100)) count++;
     else break;
   }
   return count;
@@ -312,7 +312,7 @@ function App() {
           ...today,
           [field]:
             field === "opened" || field === "studied"
-              ? Math.min(200, (today[field] as number) + amount)
+              ? Math.min(700, (today[field] as number) + amount)
               : (today[field] as number) + amount,
         },
       };
@@ -690,7 +690,7 @@ function Dashboard({
     return {
       label,
       key,
-      done: (days[key]?.studied || 0) >= (days[key]?.goal || 20),
+      done: (days[key]?.studied || 0) >= (days[key]?.goal || 100),
       active: (days[key]?.studied || 0) > 0,
       today: key === dayKey(),
     };
@@ -766,7 +766,7 @@ function Dashboard({
             minggu ini
           </p>
           <small className="streak-rule">
-            Streak dihitung setelah target harian tercapai: 20 kartu.
+            Streak dihitung setelah target harian tercapai: 100 kartu.
           </small>
         </section>
       </div>
@@ -1998,6 +1998,9 @@ function Module({
           reviewCount={reviewCount}
           streak={streak}
           toast={toast}
+          days={days}
+          todayStats={todayStats}
+          words={words}
         />
       ) : (
         <div className="module-grid">
@@ -2686,31 +2689,27 @@ function Achievements({
   cardsOpened,
   reviewCount,
   streak,
+  days,
+  todayStats,
+  words,
 }: {
   cardsOpened: number;
   reviewCount: number;
   streak: number;
   toast: (message: string) => void;
+  days: Record<string, DayStats>;
+  todayStats: DayStats;
+  words: Word[];
 }) {
-  const target = 20;
+  const target = 100;
   const todayKey = localKey();
   const [range, setRange] = useState("week");
-  const [daily] = useState<Record<string, number>>(() => {
-    const stored = JSON.parse(
-      localStorage.getItem("ziaedu-daily-stats") || "{}",
-    );
-    return Object.fromEntries(
-      Object.entries(stored).map(([key, value]) => [
-        key,
-        (value as DayStats).studied,
-      ]),
-    );
-  });
-  const today = Math.min(daily[todayKey] || 0, target);
+  const daily = Object.fromEntries(
+    Object.entries(days).map(([key, value]) => [key, value.studied]),
+  );
+  const today = Math.min(todayStats.studied, target);
   const percentage = Math.min(100, Math.round((today / target) * 100));
-  const yesterdayKey = new Date(Date.now() - 86400000)
-    .toISOString()
-    .slice(0, 10);
+  const yesterdayKey = localKey(new Date(Date.now() - 86400000));
   const yesterday = Math.min(daily[yesterdayKey] || 0, target);
   const change = percentage - Math.round((yesterday / target) * 100);
   const dateList = Array.from({ length: 7 }, (_, i) => {
@@ -2730,7 +2729,10 @@ function Achievements({
     dateList.reduce((sum, item) => sum + item.value, 0) / dateList.length,
   );
   const completedDays = dateList.filter((item) => item.value > 0).length;
-  const mastered = 0;
+  const mastered = todayStats.mastered;
+  const accuracy = todayStats.reviewed
+    ? Math.round((todayStats.correct / todayStats.reviewed) * 100)
+    : 0;
   const reviewProgress = Math.min(
     100,
     Math.round((reviewCount / target) * 100),
@@ -2781,9 +2783,9 @@ function Achievements({
           <small>{completedDays} hari aktif minggu ini</small>
         </div>
         <div>
-          <span>Current ranking</span>
-          <strong>#1</strong>
-          <small>papan minggu ini</small>
+          <span>Akurasi hari ini</span>
+          <strong>{accuracy}%</strong>
+          <small>{todayStats.reviewed} review tercatat</small>
         </div>
       </div>
       <div className="ranking-main-grid">
@@ -2902,6 +2904,9 @@ function Statistics({
     : 0;
   const formatTime = (value: number) =>
     `${Math.floor(value / 3600)}j ${Math.floor((value % 3600) / 60)}m`;
+  const accuracyPoints = accuracy
+    .map((value, index) => `${index * 100},${160 - value * 1.3}`)
+    .join(" ");
   return (
     <div className="stats-page">
       <div className="page-head">
@@ -2989,12 +2994,13 @@ function Statistics({
                   <stop offset="1" stopColor="#54d7a2" stopOpacity="0" />
                 </linearGradient>
               </defs>
-              <path
-                d="M0 130 C70 125 72 90 145 105 S220 130 285 72 S350 88 410 72 S490 80 600 28 L600 180 L0 180Z"
+              <polyline
+                points={`${accuracyPoints} 600,180 0,180`}
                 fill="url(#statsFill)"
+                opacity=".25"
               />
-              <path
-                d="M0 130 C70 125 72 90 145 105 S220 130 285 72 S350 88 410 72 S490 80 600 28"
+              <polyline
+                points={accuracyPoints}
                 fill="none"
                 stroke="#54d7a2"
                 strokeWidth="3"
