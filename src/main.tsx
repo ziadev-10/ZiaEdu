@@ -46,6 +46,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 type Page =
   | "home"
   | "vocabulary"
+  | "decks"
   | "flashcards"
   | "speaking"
   | "notes"
@@ -67,6 +68,41 @@ type Word = {
   favorite: boolean;
   next: string;
   reviewed: boolean;
+};
+type DayStats = {
+  opened: number;
+  studied: number;
+  reviewed: number;
+  mastered: number;
+  seconds: number;
+  correct: number;
+  goal: number;
+};
+const dayKey = () => new Date().toISOString().slice(0, 10);
+const blankDay = (): DayStats => ({
+  opened: 0,
+  studied: 0,
+  reviewed: 0,
+  mastered: 0,
+  seconds: 0,
+  correct: 0,
+  goal: 20,
+});
+const readDays = (): Record<string, DayStats> => {
+  try {
+    return JSON.parse(localStorage.getItem("ziaedu-daily-stats") || "{}");
+  } catch {
+    return {};
+  }
+};
+const learningStreak = (days: Record<string, DayStats>) => {
+  let count = 0;
+  for (let i = 0; i < 365; i++) {
+    const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    if ((days[date]?.studied || 0) >= (days[date]?.goal || 20)) count++;
+    else break;
+  }
+  return count;
 };
 
 const starterWords: Word[] = [
@@ -225,6 +261,38 @@ function App() {
   const [toast, setToast] = useState("");
   const [xp, setXp] = useState(1240);
   const [streak, setStreak] = useState(12);
+  const [cardsOpened, setCardsOpened] = useState(() =>
+    Number(localStorage.getItem("ziaedu-cards-opened") || 0),
+  );
+  const [reviewCount, setReviewCount] = useState(() =>
+    Number(localStorage.getItem("ziaedu-review-count") || 0),
+  );
+  const [days, setDays] = useState<Record<string, DayStats>>(() => readDays());
+  const activeStudyPage =
+    page === "flashcards" || page === "vocabulary" || page === "speaking";
+  const todayStats = days[dayKey()] || blankDay();
+  const actualStreak = learningStreak(days);
+  const addToday = (field: keyof DayStats, amount = 1) =>
+    setDays((current) => {
+      const key = dayKey();
+      const today = { ...blankDay(), ...(current[key] || {}) };
+      const next = {
+        ...current,
+        [key]: { ...today, [field]: (today[field] as number) + amount },
+      };
+      localStorage.setItem("ziaedu-daily-stats", JSON.stringify(next));
+      return next;
+    });
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (activeStudyPage && document.visibilityState === "visible")
+        addToday("seconds", 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeStudyPage]);
+  useEffect(() => {
+    setStreak(actualStreak);
+  }, [actualStreak]);
   useEffect(() => {
     document.body.dataset.theme = dark ? "dark" : "light";
   }, [dark]);
@@ -246,6 +314,27 @@ function App() {
     setMobileNav(false);
   };
   const review = (id: number, grade: string) => {
+    addToday("reviewed");
+    if (grade !== "Again") addToday("correct");
+    const reviewedWord = words.find((word) => word.id === id);
+    const nextMastery = Math.min(
+      100,
+      (reviewedWord?.mastery || 0) +
+        (grade === "Easy"
+          ? 14
+          : grade === "Good"
+            ? 9
+            : grade === "Hard"
+              ? 4
+              : 0),
+    );
+    if (reviewedWord && reviewedWord.mastery < 100 && nextMastery >= 100)
+      addToday("mastered");
+    setReviewCount((count) => {
+      const next = count + 1;
+      localStorage.setItem("ziaedu-review-count", String(next));
+      return next;
+    });
     const next =
       grade === "Again"
         ? "Today"
@@ -317,6 +406,8 @@ function App() {
               words={words}
               streak={streak}
               xp={xp}
+              cardsOpened={cardsOpened}
+              todayStats={todayStats}
             />
           )}{" "}
           {page === "vocabulary" && (
@@ -328,8 +419,31 @@ function App() {
               toast={setToast}
             />
           )}{" "}
+          {page === "decks" && <Decks words={words} go={go} toast={setToast} />}{" "}
           {page === "flashcards" && (
-            <Flashcards words={words} onReview={review} go={go} />
+            <Flashcards
+              words={words}
+              onReview={review}
+              go={go}
+              onCardStudied={() => addToday("studied")}
+              onCardOpened={() => {
+                addToday("opened");
+                setCardsOpened((count) => {
+                  const next = count + 1;
+                  localStorage.setItem("ziaedu-cards-opened", String(next));
+                  return next;
+                });
+                const key = new Date().toISOString().slice(0, 10);
+                const activity = JSON.parse(
+                  localStorage.getItem("ziaedu-daily-activity") || "{}",
+                );
+                activity[key] = (activity[key] || 0) + 1;
+                localStorage.setItem(
+                  "ziaedu-daily-activity",
+                  JSON.stringify(activity),
+                );
+              }}
+            />
           )}{" "}
           {page !== "home" &&
             page !== "vocabulary" &&
@@ -342,6 +456,10 @@ function App() {
                 toast={setToast}
                 xp={xp}
                 streak={streak}
+                cardsOpened={cardsOpened}
+                reviewCount={reviewCount}
+                todayStats={todayStats}
+                days={days}
               />
             )}
         </main>
@@ -439,6 +557,11 @@ function Header({
   go: (x: Page) => void;
   xp: number;
 }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   return (
     <header className="topbar">
       <button className="icon-btn menu-btn" onClick={() => setMobileNav(true)}>
@@ -454,6 +577,17 @@ function Header({
         <kbd>⌘ K</kbd>
       </div>
       <div className="top-actions">
+        <div className="real-time-clock">
+          <b>{now.toLocaleTimeString("id-ID", { hour12: false })}</b>
+          <small>
+            {now.toLocaleDateString("en-US", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })}
+          </small>
+        </div>
         <button className="lang">
           <Languages size={16} /> EN <ChevronDown size={13} />
         </button>
@@ -481,12 +615,16 @@ function Dashboard({
   words,
   streak,
   xp,
+  cardsOpened,
+  todayStats,
 }: {
   go: (p: Page) => void;
   due: number;
   words: Word[];
   streak: number;
   xp: number;
+  cardsOpened: number;
+  todayStats: DayStats;
 }) {
   return (
     <>
@@ -561,8 +699,8 @@ function Dashboard({
         <Stat
           icon={BookOpen}
           label="Total Kartu"
-          value={words.length * 63 + 24}
-          note="+18 minggu ini"
+          value={words.length}
+          note={`${todayStats.opened} kartu dibuka hari ini`}
         />
         <Stat
           icon={RotateCcw}
@@ -574,15 +712,15 @@ function Dashboard({
         <Stat
           icon={Zap}
           label="Total Tinjauan"
-          value="1,284"
-          note="+12% dari bulan lalu"
+          value={todayStats.reviewed}
+          note="review hari ini"
           accent="green"
         />
         <Stat
           icon={Target}
           label="Akurasi"
-          value="87.4%"
-          note="sangat baik"
+          value={`${todayStats.reviewed ? Math.round((todayStats.correct / todayStats.reviewed) * 100) : 0}%`}
+          note="akurasi hari ini"
           accent="purple"
         />
       </div>
@@ -658,9 +796,9 @@ function Dashboard({
           <div>
             <h3>Pencapaian Terbaru</h3>
             <p>
-              {words.length > 0
-                ? "First Word"
-                : "Mulai belajar untuk membuka pencapaian"}
+              {cardsOpened > 0
+                ? "First Step"
+                : "Buka kartu belajar untuk membuka pencapaian"}
             </p>
           </div>
           <button className="text-btn" onClick={() => go("achievements")}>
@@ -669,9 +807,9 @@ function Dashboard({
         </div>
         <div className="dashboard-achievement-list">
           <div>
-            <span className="mini-achievement-icon">📚</span>
-            <b>First Word</b>
-            <small>Pelajari 1 kosakata</small>
+            <span className="mini-achievement-icon">📖</span>
+            <b>First Step</b>
+            <small>Pelajari 1 kartu</small>
           </div>
           <div>
             <span className="mini-achievement-icon">🔥</span>
@@ -683,7 +821,7 @@ function Dashboard({
             <b>Review Starter</b>
             <small>Selesaikan 10 review kartu</small>
           </div>
-          <strong>{words.length > 0 ? "1 / 10" : "0 / 10"}</strong>
+          <strong>{cardsOpened > 0 ? "1 / 10" : "0 / 10"}</strong>
         </div>
       </section>
     </>
@@ -782,6 +920,127 @@ function MiniChart() {
       </svg>
     </div>
   );
+}
+function Decks({
+  words,
+  go,
+  toast,
+}: {
+  words: Word[];
+  go: (p: Page) => void;
+  toast: (message: string) => void;
+}) {
+  const [decks, setDecks] = useState(
+    () =>
+      JSON.parse(localStorage.getItem("ziaedu-decks") || "[]") as {
+        name: string;
+        topic: string;
+      }[],
+  );
+  const [name, setName] = useState("");
+  const topics = Array.from(new Set(words.map((word) => word.topic)));
+  const create = () => {
+    if (!name.trim()) {
+      toast("Beri nama deck dulu");
+      return;
+    }
+    const next = [...decks, { name: name.trim(), topic: "Custom" }];
+    setDecks(next);
+    localStorage.setItem("ziaedu-decks", JSON.stringify(next));
+    setName("");
+    toast("Deck berhasil dibuat");
+  };
+  return (
+    <div className="decks-page">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">RUANG KOSAKATA / DECK</div>
+          <h1>
+            Deck Saya<span className="blue-dot">.</span>
+          </h1>
+          <p>Kelompokkan kartu kosakata sesuai tujuan belajar kamu.</p>
+        </div>
+        <button className="btn ghost" onClick={() => go("vocabulary")}>
+          <BookOpen size={16} /> Kembali ke kosakata
+        </button>
+      </div>
+      <div className="deck-create panel">
+        <div>
+          <h3>Buat deck baru</h3>
+          <p>Simpan kumpulan kartu untuk sesi belajar yang lebih terarah.</p>
+        </div>
+        <div className="deck-create-form">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nama deck, contoh: Travel essentials"
+          />
+          <button className="btn primary" onClick={create}>
+            <Plus size={16} /> Buat deck
+          </button>
+        </div>
+      </div>
+      <div className="deck-grid">
+        {topics.map((topic) => (
+          <div className="deck-card" key={topic}>
+            <div className="deck-icon">
+              <BookOpen size={21} />
+            </div>
+            <span className="pill blue">TOPIK</span>
+            <h3>{topic}</h3>
+            <p>
+              {words.filter((word) => word.topic === topic).length} kartu ·{" "}
+              {
+                words.filter(
+                  (word) => word.topic === topic && word.mastery >= 80,
+                ).length
+              }{" "}
+              dikuasai
+            </p>
+            <div className="bar">
+              <span
+                style={{
+                  width: `${words.filter((word) => word.topic === topic).length ? Math.round((words.filter((word) => word.topic === topic && word.mastery >= 80).length / words.filter((word) => word.topic === topic).length) * 100) : 0}%`,
+                }}
+              />
+            </div>
+            <button className="text-btn" onClick={() => go("flashcards")}>
+              Mulai belajar <ArrowRight size={14} />
+            </button>
+          </div>
+        ))}
+        {decks.map((deck) => (
+          <div className="deck-card custom-deck" key={deck.name}>
+            <div className="deck-icon purple">
+              <LayersIcon />
+            </div>
+            <span className="pill purple">CUSTOM</span>
+            <h3>{deck.name}</h3>
+            <p>Deck pribadi · siap diisi</p>
+            <div className="bar">
+              <span style={{ width: "0%" }} />
+            </div>
+            <button
+              className="text-btn"
+              onClick={() => toast(`${deck.name} dipilih`)}
+            >
+              Buka deck <ArrowRight size={14} />
+            </button>
+          </div>
+        ))}
+        {topics.length === 0 && decks.length === 0 && (
+          <div className="empty">
+            <BookOpen size={28} />
+            <b>Belum ada deck</b>
+            <span>Buat deck pertama kamu di atas.</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function LayersIcon() {
+  return <LayoutGrid size={21} />;
 }
 
 function Vocabulary({
@@ -1012,13 +1271,6 @@ function Vocabulary({
         >
           Favorit <b>{words.filter((w) => w.favorite).length}</b>
         </button>
-        <button
-          onClick={() =>
-            toast("Deck akan tersedia setelah kamu menyimpan beberapa kata")
-          }
-        >
-          Deck saya <b>4</b>
-        </button>
       </div>
       <div className="vocab-toolbar">
         <div className="search-box inner">
@@ -1040,9 +1292,6 @@ function Vocabulary({
             <option>C1</option>
           </select>
         </div>
-        <button className="btn ghost" onClick={() => setTab("all")}>
-          <BookOpen size={16} /> Deck saya
-        </button>
       </div>
       <div className="import-help">
         <FileTextIcon />
@@ -1292,19 +1541,27 @@ function Flashcards({
   words,
   onReview,
   go,
+  onCardOpened,
+  onCardStudied,
 }: {
   words: Word[];
   onReview: (id: number, g: string) => void;
   go: (p: Page) => void;
+  onCardOpened: () => void;
+  onCardStudied: () => void;
 }) {
   const queue = words.filter((w) => !w.reviewed);
   const [index, setIndex] = useState(0);
   const [show, setShow] = useState(false);
   const card = queue[index % Math.max(1, queue.length)];
   useEffect(() => {
+    if (card) onCardOpened();
+  }, [card?.id]);
+  useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         e.preventDefault();
+        if (!show) onCardStudied();
         setShow(true);
       }
       if (show && ["1", "2", "3", "4"].includes(e.key)) {
@@ -1325,7 +1582,10 @@ function Flashcards({
         <span>Kembali besok untuk menjaga streak kamu.</span>
       </div>
     );
-  const answer = () => setShow(true);
+  const answer = () => {
+    if (!show) onCardStudied();
+    setShow(true);
+  };
   return (
     <div className="study-page">
       <div className="study-top">
@@ -1461,6 +1721,10 @@ function Module({
   toast,
   xp,
   streak,
+  cardsOpened,
+  reviewCount,
+  todayStats,
+  days,
 }: {
   page: Page;
   go: (p: Page) => void;
@@ -1469,6 +1733,10 @@ function Module({
   toast: (x: string) => void;
   xp: number;
   streak: number;
+  cardsOpened: number;
+  reviewCount: number;
+  todayStats: DayStats;
+  days: Record<string, DayStats>;
 }) {
   const info: Record<string, { title: string; desc: string; icon: any }> = {
     topics: {
@@ -1620,9 +1888,19 @@ function Module({
       ) : page === "tutor" ? (
         <Tutor toast={toast} />
       ) : page === "stats" ? (
-        <Statistics />
+        <Statistics
+          days={days}
+          todayStats={todayStats}
+          streak={streak}
+          words={words}
+        />
       ) : page === "achievements" ? (
-        <Achievements words={words} streak={streak} toast={toast} />
+        <Achievements
+          cardsOpened={cardsOpened}
+          reviewCount={reviewCount}
+          streak={streak}
+          toast={toast}
+        />
       ) : (
         <div className="module-grid">
           {[
@@ -2088,22 +2366,26 @@ const achievementDefs: Achievement[] = [
     reward: 100,
   },
 ];
-function Achievements({
+function LegacyAchievements({
   words,
+  cardsOpened,
+  reviewCount,
   streak,
   toast,
 }: {
   words: Word[];
+  cardsOpened: number;
+  reviewCount: number;
   streak: number;
   toast: (message: string) => void;
 }) {
   const [selected, setSelected] = useState<Achievement | null>(null);
   const [celebration, setCelebration] = useState<Achievement | null>(null);
   const metrics: Record<string, number> = {
-    words: words.length,
+    words: cardsOpened,
     mastered: words.filter((w) => w.mastery >= 80).length,
     streak,
-    reviews: words.filter((w) => w.reviewed).length,
+    reviews: reviewCount,
   };
   const getProgress = (achievement: Achievement) =>
     Math.min(metrics[achievement.type] || 0, achievement.value);
@@ -2302,10 +2584,226 @@ function Achievements({
     </div>
   );
 }
-function Statistics() {
-  const days = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
-  const activity = [35, 58, 42, 76, 54, 88, 64];
-  const accuracy = [72, 78, 75, 84, 81, 89, 87];
+function Achievements({
+  cardsOpened,
+  reviewCount,
+  streak,
+}: {
+  cardsOpened: number;
+  reviewCount: number;
+  streak: number;
+  toast: (message: string) => void;
+}) {
+  const target = 20;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const [range, setRange] = useState("week");
+  const [daily] = useState<Record<string, number>>(() => {
+    const stored = JSON.parse(
+      localStorage.getItem("ziaedu-daily-stats") || "{}",
+    );
+    return Object.fromEntries(
+      Object.entries(stored).map(([key, value]) => [
+        key,
+        (value as DayStats).studied,
+      ]),
+    );
+  });
+  const today = Math.min(daily[todayKey] || 0, target);
+  const percentage = Math.min(100, Math.round((today / target) * 100));
+  const yesterdayKey = new Date(Date.now() - 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const yesterday = Math.min(daily[yesterdayKey] || 0, target);
+  const change = percentage - Math.round((yesterday / target) * 100);
+  const dateList = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() - (6 - i) * 86400000);
+    return {
+      key: d.toISOString().slice(0, 10),
+      label: d
+        .toLocaleDateString("id-ID", { weekday: "short" })
+        .replace(".", ""),
+      value: Math.min(
+        100,
+        Math.round(((daily[d.toISOString().slice(0, 10)] || 0) / target) * 100),
+      ),
+    };
+  });
+  const average = Math.round(
+    dateList.reduce((sum, item) => sum + item.value, 0) / dateList.length,
+  );
+  const completedDays = dateList.filter((item) => item.value > 0).length;
+  const mastered = 0;
+  const reviewProgress = Math.min(
+    100,
+    Math.round((reviewCount / target) * 100),
+  );
+  return (
+    <div className="achievement-page ranking-page">
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">ZIaEDU / DAILY PROGRESS</div>
+          <h1>
+            Pencapaian Saya<span className="blue-dot">.</span>
+          </h1>
+          <p>Ukur konsistensi belajar kosakata kamu setiap hari.</p>
+        </div>
+        <select
+          className="select-sm range-select"
+          value={range}
+          onChange={(e) => setRange(e.target.value)}
+        >
+          <option value="today">Hari Ini</option>
+          <option value="week">Minggu Ini</option>
+          <option value="month">Bulan Ini</option>
+        </select>
+      </div>
+      <div className="ranking-summary">
+        <div>
+          <span>Pencapaian hari ini</span>
+          <strong>{percentage}%</strong>
+          <small className={change >= 0 ? "green-text" : "orange-text"}>
+            {change >= 0 ? "↑" : "↓"} {Math.abs(change)}% dibandingkan kemarin
+          </small>
+        </div>
+        <div>
+          <span>Kemarin</span>
+          <strong>{Math.round((yesterday / target) * 100)}%</strong>
+          <small>
+            {yesterday} / {target} kartu
+          </small>
+        </div>
+        <div>
+          <span>Current streak</span>
+          <strong>🔥 {streak}</strong>
+          <small>hari berturut-turut</small>
+        </div>
+        <div>
+          <span>Weekly average</span>
+          <strong>{average}%</strong>
+          <small>{completedDays} hari aktif minggu ini</small>
+        </div>
+        <div>
+          <span>Current ranking</span>
+          <strong>#1</strong>
+          <small>papan minggu ini</small>
+        </div>
+      </div>
+      <div className="ranking-main-grid">
+        <section className="panel daily-progress-card">
+          <div className="card-head">
+            <div>
+              <h3>Progress Hari Ini</h3>
+              <p>Target harian: {target} kartu kosakata</p>
+            </div>
+            <span className="pill blue">
+              {today} / {target} kartu
+            </span>
+          </div>
+          <div className="progress-ring-wrap">
+            <div
+              className="progress-ring"
+              style={
+                {
+                  "--progress": `${percentage * 3.6}deg`,
+                } as React.CSSProperties
+              }
+            >
+              <b>{percentage}%</b>
+              <small>tercapai</small>
+            </div>
+            <div>
+              <h3>
+                {today >= target
+                  ? "Target selesai!"
+                  : `${target - today} kartu lagi`}
+              </h3>
+              <p>Kartu dibuka: {cardsOpened}</p>
+              <p>Review selesai: {reviewCount}</p>
+              <p>Kartu dikuasai: {mastered}</p>
+              <div className="bar">
+                <span style={{ width: `${percentage}%` }} />
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <section className="panel day-chart-card">
+        <div className="card-head">
+          <div>
+            <h3>Progress harian</h3>
+            <p>Lihat apakah performamu meningkat dari hari ke hari.</p>
+          </div>
+          <span className="chart-total">
+            {change >= 0 ? "↑" : "↓"} {Math.abs(change)}% kemarin
+          </span>
+        </div>
+        <div className="daily-bars">
+          {dateList.map((day) => (
+            <div className="daily-column" key={day.key}>
+              <b>{day.value}%</b>
+              <div className="daily-bar">
+                <span style={{ height: `${Math.max(day.value, 4)}%` }} />
+              </div>
+              <small>{day.label}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel streak-week">
+        <div className="card-head">
+          <div>
+            <h3>🔥 Learning streak</h3>
+            <p>Jaga ritmemu setiap hari.</p>
+          </div>
+          <strong className="streak-large">{streak} hari</strong>
+        </div>
+        <div className="streak-days">
+          {dateList.map((day) => (
+            <div key={day.key}>
+              <span className={day.value > 0 ? "done" : ""}>
+                {day.value > 0 ? "✓" : "·"}
+              </span>
+              <small>{day.label.slice(0, 1).toUpperCase()}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+function Statistics({
+  days,
+  todayStats,
+  streak,
+  words,
+}: {
+  days: Record<string, DayStats>;
+  todayStats: DayStats;
+  streak: number;
+  words: Word[];
+}) {
+  const labels = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+  const recent = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(Date.now() - (6 - i) * 86400000);
+    return days[date.toISOString().slice(0, 10)] || blankDay();
+  });
+  const activity = recent.map((day) =>
+    Math.min(100, Math.round(day.seconds / 60)),
+  );
+  const accuracy = recent.map((day) =>
+    day.reviewed ? Math.round((day.correct / day.reviewed) * 100) : 0,
+  );
+  const learned = recent.reduce((sum, day) => sum + day.studied, 0);
+  const mastered = recent.reduce((sum, day) => sum + day.mastered, 0);
+  const reviews = recent.reduce((sum, day) => sum + day.reviewed, 0);
+  const seconds = recent.reduce((sum, day) => sum + day.seconds, 0);
+  const accuracyTotal = reviews
+    ? Math.round(
+        (recent.reduce((sum, day) => sum + day.correct, 0) / reviews) * 100,
+      )
+    : 0;
+  const formatTime = (value: number) =>
+    `${Math.floor(value / 3600)}j ${Math.floor((value % 3600) / 60)}m`;
   return (
     <div className="stats-page">
       <div className="page-head">
@@ -2327,28 +2825,28 @@ function Statistics() {
         <Stat
           icon={BookOpen}
           label="Kata dipelajari"
-          value="136"
-          note="+18 minggu ini"
+          value={learned}
+          note="kartu dipelajari minggu ini"
         />
         <Stat
           icon={Trophy}
           label="Kata dikuasai"
-          value="74"
-          note="+12% bulan ini"
+          value={mastered}
+          note="kartu mastered minggu ini"
           accent="green"
         />
         <Stat
           icon={RotateCcw}
           label="Total review"
-          value="1,284"
-          note="87.4% akurasi"
+          value={reviews}
+          note={`${accuracyTotal}% akurasi aktual`}
           accent="purple"
         />
         <Stat
           icon={Flame}
           label="Waktu belajar"
-          value="4j 32m"
-          note="+38m minggu ini"
+          value={formatTime(seconds)}
+          note="waktu aktif minggu ini"
           accent="orange"
         />
       </div>
@@ -2359,7 +2857,7 @@ function Statistics() {
               <h3>Aktivitas belajar</h3>
               <p>Menit belajar per hari</p>
             </div>
-            <span className="chart-total">4j 32m</span>
+            <span className="chart-total">{formatTime(seconds)}</span>
           </div>
           <div className="large-chart">
             <div className="y-axis">
@@ -2370,11 +2868,11 @@ function Statistics() {
             </div>
             <div className="bars">
               {activity.map((value, i) => (
-                <div className="bar-column" key={days[i]}>
+                <div className="bar-column" key={labels[i]}>
                   <div className="activity-bar" style={{ height: `${value}%` }}>
                     <b>{value}</b>
                   </div>
-                  <small>{days[i]}</small>
+                  <small>{labels[i]}</small>
                 </div>
               ))}
             </div>
@@ -2386,7 +2884,7 @@ function Statistics() {
               <h3>Akurasi review</h3>
               <p>Performa jawaban kamu</p>
             </div>
-            <span className="chart-total green-text">87.4%</span>
+            <span className="chart-total green-text">{accuracyTotal}%</span>
           </div>
           <div className="line-chart">
             <svg viewBox="0 0 600 180" preserveAspectRatio="none">
@@ -2408,7 +2906,7 @@ function Statistics() {
               />
             </svg>
             <div className="chart-labels">
-              {days.map((day) => (
+              {labels.map((day) => (
                 <span key={day}>{day}</span>
               ))}
             </div>
@@ -2420,20 +2918,19 @@ function Statistics() {
               <h3>Pertumbuhan kosakata</h3>
               <p>Total kata tersimpan</p>
             </div>
-            <span className="chart-total">224</span>
+            <span className="chart-total">{words.length}</span>
           </div>
           <div className="growth-chart">
             <div className="growth-line">
-              <span style={{ height: "26%" }} />
-              <span style={{ height: "38%" }} />
-              <span style={{ height: "45%" }} />
-              <span style={{ height: "58%" }} />
-              <span style={{ height: "64%" }} />
-              <span style={{ height: "76%" }} />
-              <span style={{ height: "89%" }} />
+              {recent.map((day, index) => (
+                <span
+                  key={index}
+                  style={{ height: `${Math.min(100, day.studied * 5)}%` }}
+                />
+              ))}
             </div>
             <div className="chart-labels">
-              {days.map((day) => (
+              {labels.map((day) => (
                 <span key={day}>{day}</span>
               ))}
             </div>
@@ -2448,21 +2945,22 @@ function Statistics() {
           </div>
           <div className="mastered-visual">
             <div className="donut">
-              <b>224</b>
+              <b>{words.length}</b>
               <small>total kartu</small>
             </div>
             <div className="legend">
               <span>
                 <i className="legend-mastered" />
-                Dikuasai <b>74</b>
+                Dikuasai{" "}
+                <b>{words.filter((word) => word.mastery >= 80).length}</b>
               </span>
               <span>
                 <i className="legend-review" />
-                Ditinjau <b>96</b>
+                Ditinjau <b>{reviews}</b>
               </span>
               <span>
                 <i className="legend-learning" />
-                Dipelajari <b>54</b>
+                Dipelajari <b>{learned}</b>
               </span>
             </div>
           </div>
@@ -2474,28 +2972,53 @@ function Statistics() {
             <h3>Ringkasan minggu ini</h3>
             <p>Dibandingkan dengan minggu sebelumnya.</p>
           </div>
-          <span className="pill purple">+12% progres</span>
+          <span className="pill purple">
+            {learned
+              ? `${Math.round(learned / 7)} kartu / hari`
+              : "Belum ada aktivitas"}
+          </span>
         </div>
         <div className="weekly-row">
           <div>
             <span>Hari aktif</span>
-            <b>6 / 7</b>
-            <small className="green-text">+1 hari</small>
+            <b>{recent.filter((day) => day.studied > 0).length} / 7</b>
+            <small className="green-text">data aktual</small>
           </div>
           <div>
             <span>Rata-rata sesi</span>
-            <b>18 menit</b>
-            <small className="green-text">+4 menit</small>
+            <b>
+              {recent.filter((day) => day.seconds > 0).length
+                ? Math.round(
+                    seconds /
+                      60 /
+                      recent.filter((day) => day.seconds > 0).length,
+                  )
+                : 0}{" "}
+              menit
+            </b>
+            <small className="green-text">rata-rata aktual</small>
           </div>
           <div>
             <span>Review terbaik</span>
-            <b>Sabtu</b>
-            <small>88 kartu</small>
+            <b>
+              {
+                labels[
+                  recent.reduce(
+                    (best, day, index) =>
+                      day.reviewed > recent[best].reviewed ? index : best,
+                    0,
+                  )
+                ]
+              }
+            </b>
+            <small>
+              {Math.max(...recent.map((day) => day.reviewed))} kartu
+            </small>
           </div>
           <div>
             <span>Streak saat ini</span>
-            <b>12 hari</b>
-            <small className="orange-text">Pertahankan!</small>
+            <b>{streak} hari</b>
+            <small className="orange-text">data aktual</small>
           </div>
         </div>
       </section>
